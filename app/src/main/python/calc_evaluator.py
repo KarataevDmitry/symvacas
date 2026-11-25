@@ -19,6 +19,7 @@ from calc_statistics import distribution_value, fit_custom_regression, fit_regre
 from calc_advanced_statistics import FUNCTIONS as ADVANCED_STATISTICS, advanced
 from calc_finance import finance_value
 from calc_integrals import rational_trig_primitive, log_arctan_primitive
+from calc_projective_cas import projective_fresnel_improper, projective_rational_primitive
 from calc_solutions import affine_exponential_solutions
 from calc_number_theory import bounded_divisors
 from calc_extrema import extrema_candidates
@@ -60,7 +61,8 @@ def has_oversized_power(value):
 class Engine:
     def __init__(self, request):
         self.request = request
-        self.precision = max(3, min(200, int(request.get("precision", 30))))
+        raw_prec = int(request.get("precision", 30))
+        self.precision = max(3, raw_prec if limits_removed() else min(200, raw_prec))
         # Display digits limit only what the result view shows; the numeric work keeps self.precision.
         self.display_digits = max(1, min(self.precision, int(request.get("displayDigits", self.precision))))
         self.angle = request.get("angle", "RAD")
@@ -594,17 +596,34 @@ class Engine:
             return s.rsolve(equation,dependent)
         if name == "integrate":
             self.integral_strategy = None
+            self.projective_step_info = None
             require(len(a) in (2,4), "integrate expects a variable or integration bounds")
             spec = a[1] if len(a)==2 else (a[1],a[2],a[3])
+            if len(a) == 4 and isinstance(a[1], s.Symbol):
+                fresnel_proj = projective_fresnel_improper(a[0], a[1], a[2], a[3])
+                if fresnel_proj is not None:
+                    result, note, step_info = fresnel_proj
+                    self.integral_strategy = "projective_cas"
+                    self.projective_step_info = step_info
+                    self.note = note
+                    return result
             result = s.integrate(a[0],spec)
-            if result.has(s.Integral) and len(a)==2 and isinstance(a[1],s.Symbol):
-                substituted=log_arctan_primitive(a[0],a[1])
-                if substituted is not None: self.integral_strategy="log_arctan_polylog"
-                else: substituted=rational_trig_primitive(a[0],a[1])
-                if substituted is not None:
-                    result,conditions,note=substituted
-                    self.conditions.extend(conditions)
-                    self.note=note
+            if len(a)==2 and isinstance(a[1],s.Symbol):
+                if result.has(s.Integral, s.RootSum):
+                    proj_rat = projective_rational_primitive(a[0], a[1])
+                    if proj_rat is not None:
+                        result, step_info = proj_rat
+                        self.integral_strategy = "projective_cas"
+                        self.projective_step_info = step_info
+                        self.note = "Integrated via projective Ostrowski–Hermite reduction and Lagrange pole pairing over Q(i, sqrt(d-1))."
+                if result.has(s.Integral):
+                    substituted=log_arctan_primitive(a[0],a[1])
+                    if substituted is not None: self.integral_strategy="log_arctan_polylog"
+                    else: substituted=rational_trig_primitive(a[0],a[1])
+                    if substituted is not None:
+                        result,conditions,note=substituted
+                        self.conditions.extend(conditions)
+                        self.note=note
             if result.has(s.Integral): self.note = "Symbolic solution not found for the remaining integral. For a definite value, use nintegrate(expr,x,a,b) with finite bounds in the expression domain."
             elif len(a)==2 and not isinstance(a[1], (list,tuple)): result += self.symbol("C")
             return result

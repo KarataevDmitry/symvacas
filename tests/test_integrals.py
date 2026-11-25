@@ -46,5 +46,58 @@ class RationalTrigIntegralTests(unittest.TestCase):
         formula=(s.atan(s.sqrt(2)*t-1)+s.atan(s.sqrt(2)*t+1))/s.sqrt(2)+s.log((t**2-s.sqrt(2)*t+1)/(t**2+s.sqrt(2)*t+1))/(2*s.sqrt(2))
         self.assertEqual(0,s.cancel(s.diff(formula,t)-2*t**2/(1+t**4)))
 
+
+class ProjectiveCalculusTests(unittest.TestCase):
+    def test_projective_hermite_lagrange_and_fresnel_sector_rotation(self):
+        import json
+        import calc_engine
+        from calc_projective_cas import projective_fresnel_improper, projective_pi, projective_rational_primitive
+
+        x = s.Symbol("x", real=True)
+        # 1. Repeated-pole biquadratic rational integral via Ostrowski-Hermite + Lagrange over Q(i, sqrt(2))
+        prim, step_info = projective_rational_primitive(x**2 / (1 + x**4) ** 2, x)
+        self.assertFalse(prim.has(s.Integral, s.RootSum))
+        self.assertEqual(0, s.simplify(s.cancel(s.diff(prim, x) - x**2 / (1 + x**4) ** 2)))
+        self.assertNotEqual(0, step_info["hermite_rat"])
+
+        # 2. Improper Fresnel-Airy integrals via sector rotation zeta_{2n}
+        res_f2, note_f2, info_f2 = projective_fresnel_improper(s.sin(x**2), x, s.Integer(0), s.oo)
+        self.assertEqual(0, s.simplify(res_f2 - s.sqrt(2 * s.pi) / 4))
+        self.assertIn("sector rotation", note_f2)
+
+        res_f3, _, _ = projective_fresnel_improper(s.cos(x**3), x, s.Integer(0), s.oo)
+        self.assertEqual(0, s.simplify(res_f3 - s.gamma(s.Rational(1, 3)) / (2 * s.sqrt(3))))
+
+        # 3. Full engine dispatch with step-by-step explanations and arbitrary precision (400 digits)
+        tree = {
+            "kind": "call",
+            "value": "integrate",
+            "args": [
+                {"kind": "call", "value": "sin", "args": [{"kind": "binary", "value": "^", "args": [{"kind": "symbol", "value": "x"}, {"kind": "number", "value": "2"}]}]},
+                {"kind": "symbol", "value": "x"},
+                {"kind": "number", "value": "0"},
+                {"kind": "symbol", "value": "oo"},
+            ],
+        }
+        out = json.loads(
+            calc_engine.dispatch(
+                json.dumps(
+                    {
+                        "tree": tree,
+                        "precision": 400,
+                        "displayDigits": 400,
+                        "removeComputationLimit": True,
+                        "solutionSteps": True,
+                    }
+                )
+            )
+        )
+        self.assertTrue(out["ok"], out)
+        self.assertGreaterEqual(len(out["decimal"]), 395)
+        step_titles = [st["title"] for st in out["solutionSteps"]["steps"]]
+        self.assertTrue(any("Projective sector rotation" in t for t in step_titles), step_titles)
+        self.assertTrue(str(projective_pi(60)).startswith("3.1415926535897932384626433832795028841971693993751058209"))
+
+
 if __name__=="__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 import sympy as s
 from calc_display import display_tree, readable
 from calc_limit_steps import limit_steps
+from calc_projective_cas import append_projective_steps, projective_rational_primitive
 
 SUMMARY = "A detailed derivation is not available for this expression. The computed result is shown below."
 TRUNCATED = "Some intermediate steps were omitted to keep the explanation manageable. The computed result is unchanged."
@@ -123,7 +124,10 @@ def calculus_steps(engine, method, values, answer):
     elif method == "integrate":
         integral = s.Integral(expression, variable) if len(values) == 2 else s.Integral(expression, (variable, values[2], values[3]))
         add("Integrate the expression", "Find an antiderivative whose derivative is the integrand.", integral)
-        if getattr(engine, "integral_strategy", None) == "log_arctan_polylog":
+        proj_info = getattr(engine, "projective_step_info", None)
+        if proj_info is not None and append_projective_steps(proj_info, expression, variable, add, eq):
+            pass
+        elif getattr(engine, "integral_strategy", None) == "log_arctan_polylog":
             u = s.log(variable)
             coefficient=s.cancel(expression*(1+variable**2)/s.log(variable))
             if coefficient!=1:
@@ -185,9 +189,13 @@ def calculus_steps(engine, method, values, answer):
             else: note = SUMMARY
         else: note = "An antiderivative was not found. This does not prove that no closed form exists. For a numerical value, supply a finite integration interval." if answer.has(s.Integral) else SUMMARY
         if len(values) == 2 and note == SUMMARY and verified_primitive(answer, expression, variable):
-            derivative = s.diff(answer, variable)
-            add('Verify the antiderivative by differentiation', 'Differentiate the returned antiderivative and simplify. This checks the result on its original domain without claiming a rule-by-rule derivation.', eq(s.Derivative(answer, variable, evaluate=False), derivative), eq(s.simplify(derivative-expression), 0))
-            note = 'A rule-by-rule derivation is unavailable. The returned antiderivative has been checked by differentiation on its original domain.'
+            proj_fallback = projective_rational_primitive(expression, variable)
+            if proj_fallback is not None and append_projective_steps(proj_fallback[1], expression, variable, add, eq):
+                note = ""
+            else:
+                derivative = s.diff(answer, variable)
+                add('Verify the antiderivative by differentiation', 'Differentiate the returned antiderivative and simplify. This checks the result on its original domain without claiming a rule-by-rule derivation.', eq(s.Derivative(answer, variable, evaluate=False), derivative), eq(s.simplify(derivative-expression), 0))
+                note = 'A rule-by-rule derivation is unavailable. The returned antiderivative has been checked by differentiation on its original domain.'
         if len(values) == 4 and not answer.has(s.Integral):
             # Avoid a second integration: the rule primitive, when available, supplies F.
             if 'primitive' in locals() and agrees:
